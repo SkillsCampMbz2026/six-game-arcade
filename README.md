@@ -292,18 +292,37 @@ Those characters are pinned by tests written against the 9mm rather than by
 rank — three of the five were asked for high damage, and only two can be in
 any top two.
 
-**Each one sounds like what it is.** The report is shaped by the weapon's own
-numbers rather than recorded per gun: damage and reload time give a weight from
-0 to 1, and that decides how loud it is, how far the tone falls, how long it
-rings and what it is built from. The SMG gets a thin bright crack through a
-highpass and nothing else. The sniper gets that crack pitched right down, a
-longer report under it, a chest thump and the walls answering a moment later —
-**3.8 times the loudness and twice the layers**. Rebalance a gun and its sound
-follows on its own.
+**Each one sounds like what it is**, and the report is shaped by the weapon's
+own numbers rather than recorded per gun — so rebalancing one carries its sound
+along with it.
+
+Two dials, because the two things that shape a report are not the same thing:
+
+- **Weight**, from damage and reload time together, decides how far the crack
+  is pitched down, how long it rings, and which waveform and filter it uses. A
+  light gun cracks through a highpass and is over in 50 ms; a heavy one thumps
+  through a lowpass and rings for a third of a second.
+- **Punch**, from damage alone, decides whether there is a **boom** under the
+  shot at all — a short low sine you feel more than hear, with a soft slap off
+  the walls behind it. The revolver is the case that tells the two apart: quick
+  to reload, so light overall, but it hits hard enough to thump.
+
+The boom is deliberately small — it always sits under the crack that carries
+it, and across the whole range a shot roughly *doubles* in volume rather than
+trebling. Loud enough that a hard-hitting gun is unmistakable, quiet enough
+that firing one repeatedly does not wear you out.
+
+| | damage | boom | loudness |
+|---|---|---|---|
+| SMG | 5 | — | 0.36 |
+| 9mm | 8 | — | 0.38 |
+| Revolver | 20 | yes | 0.51 |
+| Shotgun | 30 | yes | 0.60 |
+| Sniper | 60 | yes | 0.78 |
 
 **Right-click brings the sights up**, narrowing the view from 95 degrees to 52
 and bringing the weapon onto the centre line; sway and recoil damp to a fifth
-while it is there. **R reloads**, and firing dry starts one by itself.
+while it is there. **R or Shift reloads**, and firing dry starts one by itself.
 
 The weapon is drawn in **a second pass over a cleared depth buffer**, in a
 little scene of its own with its own camera and lights. Simply turning depth

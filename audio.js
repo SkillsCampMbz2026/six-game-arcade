@@ -125,43 +125,49 @@ const audio = (() => {
     lose: () => notes([392, 330, 262], 0.13, { type: 'sawtooth', gain: 0.18 }),
     draw: () => notes([440, 415], 0.12),
     step: () => hiss({ dur: 0.07, freq: 260, gain: 0.09, type: 'lowpass' }),
-    /* A gunshot, shaped by how heavy the weapon is — 0 for the lightest thing
-       you carry, 1 for the heaviest.
+    /* A gunshot.
 
-       A light, fast gun gets a bright crack and nothing else: short, thin, and
-       quiet enough to fire sixteen times a second without turning to mush. A
-       heavy one gets the crack pitched right down, a longer report under it, a
-       thump you feel rather than hear, and the walls answering a moment later.
-       Loudness roughly doubles across that range. */
-    shot: (heft = 0) => {
+       Two dials, because the two things that shape a report are not the same
+       thing. `heft` is how substantial the weapon is overall — it decides how
+       far the crack is pitched down and how long it rings. `punch` is how hard
+       the round hits, and it alone decides whether there is a boom under the
+       shot at all.
+
+       The boom is deliberately small: a short low sine you feel more than hear,
+       with a soft slap off the walls behind it. Loud enough that a hard-hitting
+       gun is unmistakable, quiet enough that firing one repeatedly does not
+       wear you out. Across the whole range the shot roughly doubles in volume
+       rather than trebling. */
+    shot: (heft = 0, punch = 0) => {
       const w = Math.max(0, Math.min(1, heft));
+      const hit = Math.max(0, Math.min(1, punch));
 
       // The crack. Bright and brief when light, dull and drawn out when heavy.
       hiss({
-        dur: 0.05 + w * 0.1,
-        freq: 3600 - w * 2600,
-        gain: 0.2 + w * 0.22,
+        dur: 0.05 + w * 0.09,
+        freq: 3600 - w * 2500,
+        gain: 0.19 + w * 0.09,
         type: w > 0.5 ? 'lowpass' : 'highpass',
       });
 
-      // The report: further to fall, and longer about it, the heavier it is.
+      // The report under it: further to fall, and longer about it, with weight.
       tone({
         freq: 320 - w * 215,
         to: 70 - w * 34,
-        dur: 0.12 + w * 0.34,
+        dur: 0.11 + w * 0.26,
         type: w > 0.45 ? 'sawtooth' : 'square',
-        gain: 0.18 + w * 0.28,
+        gain: 0.17 + w * 0.11,
       });
 
-      // Only the heavy ones have a chest thump, or an echo off the walls.
-      if (w > 0.35) {
-        tone({ freq: 92 - w * 42, to: 30, dur: 0.3 + w * 0.4, type: 'sine', gain: 0.16 + w * 0.24 });
+      // Only a gun that hits hard gets a boom, and only a small one.
+      if (hit > 0.2) {
+        tone({ freq: 96 - hit * 46, to: 34, dur: 0.14 + hit * 0.16, type: 'sine', gain: 0.05 + hit * 0.1 });
         hiss({
-          dur: 0.35 + w * 0.5,
-          freq: 380,
-          gain: 0.05 + w * 0.11,
+          dur: 0.2 + hit * 0.28,
+          freq: 340,
+          gain: 0.02 + hit * 0.045,
           type: 'lowpass',
-          delay: 0.06 + w * 0.06,
+          delay: 0.05 + hit * 0.04,
         });
       }
     },

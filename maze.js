@@ -96,6 +96,18 @@ function weaponHeft(weapon, all = MAZE_WEAPONS) {
   return spread('damage') * 0.65 + spread('reload') * 0.35;
 }
 
+/* How hard a round hits, on the same 0-to-1 scale, and nothing else. This is
+   what decides whether a shot gets a boom under it — the question asked was
+   about damage, not about how substantial the gun feels overall, and those
+   are not the same weapon: the revolver reloads quickly but still hits hard
+   enough to thump. */
+function weaponPunch(weapon, all = MAZE_WEAPONS) {
+  const values = all.map((w) => w.damage);
+  const lowest = Math.min(...values);
+  const highest = Math.max(...values);
+  return highest === lowest ? 0 : (weapon.damage - lowest) / (highest - lowest);
+}
+
 /* Where the weapon sits with the sights up: on the centre line, close to the
    eye. Every one of them comes to the same place, which is the point — the
    crosshair is where the round goes whatever you are holding. */
@@ -2143,7 +2155,7 @@ function mountMaze(ctx) {
   // page, so going fullscreen also grabs the pointer for mouse look.
   ctx.setFullscreenTarget(view);
   ctx.setTheme('maze');
-  ctx.setHint('WASD move · space sprint · click fire · right-click aim · R reload · 1-5 swap · ⛶ mouse look');
+  ctx.setHint('WASD move · space sprint · click fire · right-click aim · R/Shift reload · 1-5 swap · ⛶ mouse look');
 
   function setInput(dir, down) {
     if (dir === 'up') input.forward = down;
@@ -2554,7 +2566,7 @@ function mountMaze(ctx) {
     flat = flatCanvas.getContext('2d');
     view.replaceChildren(flatCanvas, minimap, hud, ammoBox, sight, gameOver);
     resize();
-    ctx.setHint('WASD move · space sprint · click fire · right-click aim · R reload · 1-5 swap · ⛶ mouse look');
+    ctx.setHint('WASD move · space sprint · click fire · right-click aim · R/Shift reload · 1-5 swap · ⛶ mouse look');
     ctx.setStatus(`${reason} Playing in 2D instead.`);
     loadLevel();
     start();
@@ -2834,7 +2846,7 @@ function mountMaze(ctx) {
     shotTimer = gun.cooldown;
     flash = 0.07;
     recoil = 1;
-    audio.play('shot', weaponHeft(gun));
+    audio.play('shot', weaponHeft(gun), weaponPunch(gun));
 
     // Loud. Everything within earshot now knows exactly where you fired from.
     alertMonsters(monsters, walker);
@@ -2983,7 +2995,9 @@ function mountMaze(ctx) {
       restart();
       return;
     }
-    if (event.key === 'r' || event.key === 'R') {
+    // R or Shift. Shift repeats while it is held down, which is harmless:
+    // a reload already under way, or a full magazine, both no-op.
+    if (event.key === 'r' || event.key === 'R' || event.key === 'Shift') {
       event.preventDefault();
       reload();
       return;
@@ -3171,6 +3185,6 @@ if (typeof module !== 'undefined') {
     MONSTER_SPEED, MONSTER_MIN_START, MONSTER_REACH, MONSTER_DAMAGE, RESPAWN_MIN,
     PLAYER_HEALTH, MONSTER_HEALTH, SHOT_DAMAGE, SHOT_RANGE,
     STAMINA_MAX, SPRINT_DRAIN, STAMINA_REGEN, SPRINT_FLOOR,
-    MAZE_WEAPONS, SHOT_COOLDOWN, RELOAD_TIME, ADS_FOV, MONSTER_HEIGHT, weaponHeft,
+    MAZE_WEAPONS, SHOT_COOLDOWN, RELOAD_TIME, ADS_FOV, MONSTER_HEIGHT, weaponHeft, weaponPunch,
   };
 }
