@@ -4,7 +4,7 @@ Six games in one page. No build step and no network — plain HTML, CSS and
 JavaScript that runs straight from a file. The only dependency is three.js,
 vendored in `vendor/` and loaded on demand by the maze.
 
-**[▶ Play it](https://skillscampmbz2026.github.io/game-arcade/)**
+**[▶ Play it](https://skillscampmbz2026.github.io/six-game-arcade/)**
 
 ## The games
 
