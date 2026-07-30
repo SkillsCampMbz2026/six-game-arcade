@@ -83,10 +83,11 @@ mazes are, how many of them there are, how many things are hunting you — and
 therefore how many guns you carry, since that is one apiece — and what the
 place looks like.
 
-| | mazes | size | hunting you | guns |
-|---|---|---|---|---|
-| **Stone Maze** | 3 | 16×16 to 24×24 | 1 | 9mm |
-| **The Foundry** | 5 | 24×24 to 36×36 | 3 | 9mm, Revolver, SMG |
+| | mazes | size | hunting you | guns | healing |
+|---|---|---|---|---|---|
+| **Stone Maze** | 3 | 16×16 to 24×24 | 1 | handed to you | mends on its own |
+| **The Foundry** | 5 | 24×24 to 36×36 | 3 | handed to you | bandages only |
+| **The Mist** | 5 | 36×36 to 52×52 | 5 | **find them** | bandages only |
 
 Escape one maze and you drop straight into the next, with the clock running
 across the whole run; only finishing the last one completes the area.
@@ -98,9 +99,31 @@ The 2D fallback lays a single wash over the finished frame to match, which is
 all that renderer can afford and all it needs. The way out stays green: tint
 that too and you would lose it.
 
-The whole loadout is fetched when an area loads, not just the gun in hand —
-switching should be instant, and a model arriving a moment late would flash the
-painted stand-in up in its place.
+**The Mist** is the same maze whited out. Fog from two and a half squares to
+twenty, against the seventy everywhere else, so the walls are gone by ten and
+nothing exists past twenty. In the 2D fallback that is one gradient banded
+across the horizon rather than per-pixel fog: everything far away projects
+close to the horizon, so whitening that band reads as depth and costs one fill.
+
+You walk into it **carrying nothing**. Five guns are out there somewhere along
+with the bandages, and the first one you trip over is the one you fight with.
+
+### Things on the floor
+
+Where an area does not mend you, bandages do — 45 points of the 160 you carry,
+so worth crossing a maze for but never a full heal. They are scattered afresh
+in every maze of a run, never within four squares of where you start, never on
+the exit, and never two to a square: walking over one and silently collecting
+three would be worse than finding none. Every one is checked to be reachable
+from the start.
+
+They show on the minimap only within seven squares. Marking every bandage in
+the maze would turn a search into a shopping list, and in the Mist it would
+undo the fog entirely.
+
+The whole loadout is fetched when an area loads — and in the Mist, so are the
+guns lying on the floor, since there is no loadout to fetch and the first one
+you find would otherwise arrive a beat after you picked it up.
 
 Brick walls, tiled floors and the sky are painted onto 2D canvases at load
 time and used as textures, so there are still no image files to download. The
@@ -299,14 +322,14 @@ No two behave alike, and the 9mm is the yardstick the rest are set against:
 |---|---|---|---|---|---|---|
 | **9mm** | 8 | 15 | 9.1 | 16 | 15 | 1.40s |
 | **Revolver** | 20 | 6 | 2.4 | 9 | 6 | 1.20s |
-| **SMG** | 5 | 24 | 16.7 | 11 | 32 | 1.00s |
+| **SMG** | 3 | 40 | 16.7 | 11 | 32 | 1.00s |
 | **Shotgun** | 30 | 4 | 1.3 | 6 | 8 | 2.00s |
 | **Sniper** | 60 | 2 | 0.6 | 30 | 5 | 2.60s |
 
 The 9mm is the all-rounder — best at nothing, worst at nothing, and the only
 one holding enough to kill without stopping. The sniper hits hardest and
 reaches furthest but waits a second and a half between rounds. The shotgun
-needs four hits and six squares. The SMG hits softest and does not care. The
+needs four hits and six squares. The SMG hits softest by a distance — forty rounds to a kill — and does not care. The
 revolver is quick to reload and slow to cock.
 
 Those characters are pinned by tests written against the 9mm rather than by
@@ -335,7 +358,7 @@ that firing one repeatedly does not wear you out.
 
 | | damage | boom | loudness |
 |---|---|---|---|
-| SMG | 5 | — | 0.36 |
+| SMG | 3 | — | 0.36 |
 | 9mm | 8 | — | 0.38 |
 | Revolver | 20 | yes | 0.51 |
 | Shotgun | 30 | yes | 0.60 |
@@ -343,7 +366,9 @@ that firing one repeatedly does not wear you out.
 
 **Right-click brings the sights up**, narrowing the view from 95 degrees to 52
 and bringing the weapon onto the centre line; sway and recoil damp to a fifth
-while it is there. **R or Shift reloads**, and firing dry starts one by itself.
+while it is there. **R or Shift reloads**, and nothing reloads itself. Firing dry gives you a
+click and nothing more — a gun that quietly refills the moment you need it
+takes the decision away, and the decision is the point.
 
 The weapon is drawn in **a second pass over a cleared depth buffer**, in a
 little scene of its own with its own camera and lights. Simply turning depth

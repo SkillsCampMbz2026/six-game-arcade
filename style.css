@@ -61,6 +61,7 @@ body {
 .game[data-theme="cards"] { --x: #a78bfa; --o: #f472b6; }
 .game[data-theme="maze"]  { --x: #4ade80; --o: #fbbf24; }
 .game[data-theme="foundry"] { --x: #fb7185; --o: #fbbf24; }
+.game[data-theme="mist"]  { --x: #cbd5e1; --o: #94a3b8; }
 
 .titlebar {
   position: relative;
@@ -923,6 +924,12 @@ html:fullscreen {
 }
 
 .ammo.is-empty .ammo__count { color: #ef4444; }
+
+/* Nothing in your hands at all — the Mist starts you this way. */
+.ammo.is-unarmed .ammo__count {
+  font-size: 0.9rem;
+  color: #94a3b8;
+}
 
 .ammo.is-reloading .ammo__count {
   font-size: 0.9rem;

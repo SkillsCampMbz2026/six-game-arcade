@@ -57,7 +57,7 @@ const MAZE_WEAPONS = [
   // to fire, fastest to reload, and thirty-two of them to spend.
   {
     id: 'smg', label: 'SMG', file: 'weapons/smg.glb',
-    damage: 5, cooldown: 0.06, range: 11, ammo: 32, reload: 1,
+    damage: 3, cooldown: 0.06, range: 11, ammo: 32, reload: 1,
     yaw: 0, length: 0.42, at: [0.11, -0.11, -0.34],
   },
   // Shotgun — four shots to a kill, if you are close enough to smell it.
@@ -120,12 +120,13 @@ const GUN_TEX = 256;     // and the gun in your hands
 
 /* Areas.
 
-   An area is a whole place rather than a difficulty dial: it fixes how big its
+   An area is a whole place rather than a difficulty dial. It fixes how big its
    mazes are, how many of them there are, how many things are hunting you — and
-   therefore how many guns you carry, since that is one apiece — and what the
-   place looks like.
+   so how many guns are in play, since that is one apiece — whether you mend on
+   your own or have to find something to mend with, whether you start armed at
+   all, and what the place looks like.
 
-   The numbers are cells square, so a 16 is a 33x33 grid and a 36 is a 73x73. */
+   The numbers are cells square, so a 16 is a 33x33 grid and a 52 is a 105x105. */
 const MAZE_AREAS = [
   {
     id: 'stone',
@@ -133,6 +134,10 @@ const MAZE_AREAS = [
     monsters: 1,
     levels: [16, 20, 24],          // three, small
     theme: 'maze',
+    armed: true,                   // you start with the guns you are owed
+    regen: true,                   // and mend on your own once it loses you
+    bandages: 0,
+    scatterWeapons: false,
     tint: null,                    // as the textures were painted
   },
   {
@@ -141,16 +146,22 @@ const MAZE_AREAS = [
     monsters: 3,
     levels: [24, 27, 30, 33, 36],  // five, medium
     theme: 'foundry',
+    armed: true,
+    regen: false,                  // nothing mends on its own down here
+    bandages: 7,                   // so there are bandages lying about instead
+    scatterWeapons: false,
     /* The same maze under a different light. Nothing about the place is
-       rebuilt — the surfaces keep their own textures and are simply lit and
-       tinted red, the fog is turned to smoke, and the 2D fallback lays a wash
-       over the finished frame to match. */
+       rebuilt — the surfaces keep their own textures and are lit and tinted
+       red, the fog is turned to smoke, and the 2D fallback lays a wash over
+       the finished frame to match. */
     tint: {
       surface: 0xffab92,           // multiplies the wall and floor textures
       floor: 0xff9d84,
       coping: 0xffbda6,
       sky: 0xffb499,
       fog: 0x7a3a2c,
+      fogNear: 12,
+      fogFar: 70,
       hemiSky: 0xffc4a8,
       hemiGround: 0x4a1f16,
       sun: 0xff9457,
@@ -160,9 +171,49 @@ const MAZE_AREAS = [
       map: 'rgba(38, 10, 6, 0.72)',
     },
   },
+  {
+    id: 'mist',
+    label: 'The Mist',
+    monsters: 5,
+    levels: [36, 40, 44, 48, 52],  // five, large
+    theme: 'mist',
+    armed: false,                  // you walk in with nothing
+    regen: false,
+    bandages: 9,
+    scatterWeapons: true,          // and the guns are out there somewhere too
+    /* White out to a few squares. The fog does the work here rather than the
+       tint: surfaces are barely touched, but nothing is visible past about
+       twenty squares and the walls are gone by ten. */
+    tint: {
+      surface: 0xf0f4f6,
+      floor: 0xe4ebee,
+      coping: 0xf6fafb,
+      sky: 0xf4f8fa,
+      fog: 0xdfe7ea,
+      fogNear: 2.5,                // against the 14 and 80 everywhere else
+      fogFar: 20,
+      hemiSky: 0xffffff,
+      hemiGround: 0x9aa6ac,
+      sun: 0xf4f8ff,
+      fill: 0xcfd8dd,
+      exit: 0x22c55e,              // a deeper green, to carry through the white
+      wash: 'rgba(228, 238, 242, 0.3)',
+      map: 'rgba(28, 36, 40, 0.72)',
+    },
+  },
 ];
 
 const areaById = (id) => MAZE_AREAS.find((a) => a.id === id) || MAZE_AREAS[0];
+
+/* Things lying about the maze.
+
+   A bandage puts health back where an area will not do it for you; a weapon is
+   the only way to arm yourself somewhere you start with nothing. Both are
+   scattered at the start of every maze in the run and are gone once walked
+   over. */
+const BANDAGE_HEAL = 45;
+const PICKUP_REACH = 0.6;          // cells; walk this close and it is yours
+const PICKUP_CLEAR = 4;            // and none of them starts on top of you
 
 const WALKER_RADIUS = 0.26;    // in cells; keeps you off the wall faces
 const WALK_SPEED = 2.5;        // cells per second
@@ -583,6 +634,64 @@ function pickSearchTarget(maze, monster, rng = Math.random) {
   return best;
 }
 
+
+/* Scatter an area's pickups through a maze.
+
+   Never within a few squares of where you start, never on the exit, and never
+   two on the same square — walking over one and silently collecting three
+   would be worse than finding none. Weapons come out in loadout order, so the
+   first gun you trip over is the one the area would have handed you. */
+function scatterPickups(maze, walker, area, rng = Math.random) {
+  const room = openCells(maze).filter((cell) => {
+    const fromStart = Math.abs(cell.x - walker.x) + Math.abs(cell.y - walker.y);
+    const atExit = Math.abs(cell.x - maze.exit.x) < 2 && Math.abs(cell.y - maze.exit.y) < 2;
+    return fromStart > PICKUP_CLEAR && !atExit;
+  });
+
+  const placed = [];
+  const used = new Set();
+
+  const drop = (kind, weapon) => {
+    for (let tries = 0; tries < 60 && room.length; tries++) {
+      const cell = room[Math.floor(rng() * room.length)];
+      const key = cellKey(cell.x, cell.y);
+      if (used.has(key)) continue;
+      used.add(key);
+      placed.push({
+        x: cell.x + 0.5,
+        y: cell.y + 0.5,
+        kind,
+        weapon: weapon || null,
+        taken: false,
+        // A different starting angle each, so a row of them does not turn as one.
+        phase: rng() * Math.PI * 2,
+      });
+      return true;
+    }
+    return false;   // nowhere left to put it, in a maze this small
+  };
+
+  for (let i = 0; i < (area.bandages || 0); i++) drop('bandage');
+  if (area.scatterWeapons) {
+    for (const gun of MAZE_WEAPONS.slice(0, area.monsters)) drop('weapon', gun.id);
+  }
+
+  return placed;
+}
+
+// Everything you have just walked over. Marks them taken, so a pickup sitting
+// under your feet cannot be collected twice on consecutive frames.
+function takePickups(pickups, walker, reach = PICKUP_REACH) {
+  const got = [];
+  for (const pickup of pickups || []) {
+    if (pickup.taken) continue;
+    if (Math.hypot(pickup.x - walker.x, pickup.y - walker.y) > reach) continue;
+    pickup.taken = true;
+    got.push(pickup);
+  }
+  return got;
+}
+
 /* Can it see you? Down an open line, inside its range, and within the arc it is
    actually facing — except at arm's length, where it hardly matters which way
    it happens to be looking. */
@@ -766,7 +875,7 @@ function monsterCloseness(monster, walker) {
    Deliberately nothing else — no walls, no unexplored ground and above all no
    route to the exit, so it helps you keep track without solving the maze for
    you. */
-function drawMinimap(g, maze, walker, size, monsters, backdrop = 'rgba(6, 11, 25, 0.72)') {
+function drawMinimap(g, maze, walker, size, monsters, backdrop = 'rgba(6, 11, 25, 0.72)', pickups = null) {
   const cell = size / Math.max(maze.w, maze.h);
 
   g.clearRect(0, 0, size, size);
@@ -778,6 +887,17 @@ function drawMinimap(g, maze, walker, size, monsters, backdrop = 'rgba(6, 11, 25
   const box = Math.max(1, cell);
   for (const key of walker.trail || []) {
     g.fillRect(keyX(key) * cell, keyY(key) * cell, box, box);
+  }
+
+  /* Pickups, but only ones you are nearly on top of. Marking every bandage in
+     the maze would turn a search into a shopping list — and in the Mist, where
+     you cannot see past a few squares, it would undo the fog entirely. */
+  const dot = Math.max(2, cell * 1.1);
+  for (const pickup of pickups || []) {
+    if (pickup.taken) continue;
+    if (Math.hypot(pickup.x - walker.x, pickup.y - walker.y) > 7) continue;
+    g.fillStyle = pickup.kind === 'bandage' ? '#f8fafc' : '#fbbf24';
+    g.fillRect(pickup.x * cell - dot / 2, pickup.y * cell - dot / 2, dot, dot);
   }
 
   // The exit.
@@ -916,7 +1036,7 @@ function blend(a, b, t) {
   return `rgb(${Math.round(ar + (br - ar) * k)}, ${Math.round(ag + (bg - ag) * k)}, ${Math.round(ab + (bb - ab) * k)})`;
 }
 
-function drawRaycast(g, maze, walker, pitch, width, height, monsters, recoil = 0, wash = null) {
+function drawRaycast(g, maze, walker, pitch, width, height, monsters, recoil = 0, air = null, pickups = null) {
   const fov = (MAZE_FOV * Math.PI) / 180;
   const planeHalf = Math.tan(fov / 2);
   const project = width / 2 / planeHalf;         // world units to pixels at 1 away
@@ -1010,6 +1130,24 @@ function drawRaycast(g, maze, walker, pitch, width, height, monsters, recoil = 0
   const COLUMN_STEP = width > 1100 ? 3 : 2;
   const slab = brickSlab();
 
+  /* How far you can see. The Mist closes this right down, which is most of
+     what makes it the Mist — the walls are gone by ten squares and everything
+     past twenty is white. */
+  const fadeOver = (air && air.fogFar) ? Math.max(6, air.fogFar * 0.9) : 22;
+
+  /* What distance fades things toward. Grey by default, the area's own fog
+     where it has one — a corridor receding into white is the whole point of
+     the Mist, and receding into grey would just look dirty. */
+  const hazeRGB = (() => {
+    const hex = air && air.fog !== undefined ? air.fog : 0x96989e;
+    return [(hex >> 16) & 255, (hex >> 8) & 255, hex & 255];
+  })();
+
+  /* How much of the far distance is simply gone. Tight fog projects almost
+     everything onto the horizon, so a band there whites out the distance far
+     more cheaply than fogging every surface would. */
+  const thick = air && air.fogFar ? Math.max(0, Math.min(0.8, 1 - air.fogFar / 70)) : 0;
+
   for (let x = 0; x < width; x += COLUMN_STEP) {
     const cameraX = (2 * x) / width - 1;
     const rayX = dirX + planeX * cameraX;
@@ -1055,7 +1193,7 @@ function drawRaycast(g, maze, walker, pitch, width, height, monsters, recoil = 0
        the dusk haze rather than toward black, so nothing looks lit from
        within. The two axes are shaded differently, which is what makes a
        corner read as a corner. */
-    const fade = Math.min(1, distance / 22);
+    const fade = Math.min(1, distance / fadeOver);
     const side = hitVertical ? 1 : 0.78;
 
     let wallX = hitVertical ? walker.y + distance * rayY : walker.x + distance * rayX;
@@ -1086,7 +1224,7 @@ function drawRaycast(g, maze, walker, pitch, width, height, monsters, recoil = 0
       g.fillRect(x, top, COLUMN_STEP, slice);
     }
     if (fade > 0.02) {
-      g.fillStyle = `rgba(150, 152, 158, ${fade * 0.85})`;
+      g.fillStyle = `rgba(${hazeRGB[0]}, ${hazeRGB[1]}, ${hazeRGB[2]}, ${fade * 0.85})`;
       g.fillRect(x, top, COLUMN_STEP, slice);
     }
 
@@ -1131,6 +1269,54 @@ function drawRaycast(g, maze, walker, pitch, width, height, monsters, recoil = 0
     }
   }
 
+  /* Pickups on the floor, depth-tested like everything else and drawn before
+     the wash so the room's colour falls on them too. */
+  for (const pickup of (pickups || [])) {
+    if (pickup.taken) continue;
+    const spot = floorPoint(pickup.x, pickup.y);
+    if (!spot || spot.y <= horizon) continue;
+    const camY = (EYE_HEIGHT / (spot.y - horizon)) * project;
+    if (camY > fadeOver) continue;
+    const size = (project / camY) * 0.2;
+    if (size < 2) continue;
+
+    const mid = Math.round(spot.x);
+    if (mid < 0 || mid >= width || depth[mid] <= camY) continue;
+
+    // Bobbing, so it catches the eye the way the 3D one does.
+    const lift = Math.sin(pickup.phase) * size * 0.2 + size * 0.9;
+    const top = spot.y - lift - size / 2;
+    const dim = Math.max(0.25, 1 - camY / fadeOver);
+
+    g.globalAlpha = dim;
+    if (pickup.kind === 'bandage') {
+      g.fillStyle = '#f8fafc';
+      g.fillRect(spot.x - size / 2, top, size, size * 0.72);
+      g.fillStyle = '#ef4444';
+      g.fillRect(spot.x - size * 0.34, top + size * 0.28, size * 0.68, size * 0.16);
+      g.fillRect(spot.x - size * 0.1, top + size * 0.1, size * 0.2, size * 0.52);
+    } else {
+      g.fillStyle = '#3f4650';
+      g.fillRect(spot.x - size / 2, top, size, size * 0.6);
+      g.fillStyle = '#fbbf24';
+      g.fillRect(spot.x - size / 2, top, size, size * 0.14);
+    }
+    g.globalAlpha = 1;
+  }
+
+  /* Distance fog, as a band across the horizon. Everything far away projects
+     close to it, so this reads as depth rather than as a filter — and it costs
+     one gradient instead of a per-pixel fog the 2D renderer cannot afford. */
+  if (thick > 0) {
+    const reach = height * (0.25 + thick * 0.5);
+    const band = g.createLinearGradient(0, horizon - reach, 0, horizon + reach);
+    band.addColorStop(0, `rgba(${hazeRGB[0]}, ${hazeRGB[1]}, ${hazeRGB[2]}, 0)`);
+    band.addColorStop(0.5, `rgba(${hazeRGB[0]}, ${hazeRGB[1]}, ${hazeRGB[2]}, ${thick})`);
+    band.addColorStop(1, `rgba(${hazeRGB[0]}, ${hazeRGB[1]}, ${hazeRGB[2]}, 0)`);
+    g.fillStyle = band;
+    g.fillRect(0, horizon - reach, width, reach * 2);
+  }
+
   /* The area's own light, laid over the finished frame. One fill rather than
      tinting every surface, which is all the 2D renderer needs and all it can
      afford.
@@ -1138,8 +1324,8 @@ function drawRaycast(g, maze, walker, pitch, width, height, monsters, recoil = 0
      Under the gun, not over it: in the 3D view the weapon is drawn in its own
      pass with its own lights and does not take the room's colour, so washing
      it here would make the two renderers disagree. */
-  if (wash) {
-    g.fillStyle = wash;
+  if (air && air.wash) {
+    g.fillStyle = air.wash;
     g.fillRect(0, 0, width, height);
   }
 
@@ -1959,7 +2145,9 @@ function mountMaze(ctx) {
      number keys or the wheel. Each keeps its own rounds, so swapping away from
      an empty weapon and back again does not quietly refill it. */
   let held = 0;                             // which of the loadout is in hand
-  let rounds = [];                          // rounds left, per weapon in the loadout
+  let carried = [];                         // the guns you have, in hand order
+  let pickups = [];                         // bandages and guns lying about
+  let rounds = [];                          // rounds left, per weapon carried
   let reloading = 0;                        // seconds left of a reload
   let aiming = false;                       // right button held
   let firing = false;                       // left button held
@@ -1970,10 +2158,15 @@ function mountMaze(ctx) {
   let gunModel = null;                      // the loaded weapon, once it arrives
   const gunAt = [0, 0, 0];                  // where it sits, between hip and eye
 
-  // One gun per monster, and the area decides how many of those there are.
+  /* What you are actually carrying, in the order you came by it.
+
+     In most areas you start with one gun per monster. In the Mist you start
+     with nothing and have to find them, so this cannot be derived from the
+     monster count — it has to be a list you add to. */
   const packSize = () => area.monsters;
-  const loadout = () => MAZE_WEAPONS.slice(0, packSize());
-  const weapon = () => loadout()[Math.min(held, packSize() - 1)] || MAZE_WEAPONS[0];
+  const loadout = () => carried;
+  const weapon = () => carried[Math.min(held, carried.length - 1)] || null;
+  const armed = () => carried.length > 0;
   let killer = null;                        // whichever of them finished you
   let deathTurn = 0;                        // how far through looking at it
   const sprint = { value: STAMINA_MAX, active: false };
@@ -1994,6 +2187,7 @@ function mountMaze(ctx) {
   let exitPillar = null;
   let exitGlow = null;
   let creatures = [];       // one group per monster, paired by index
+  let pickupMeshes = [];    // one per pickup, paired by index
   let monsterModel = null;  // the supplied .glb, once it has arrived
   let pitch = 0;          // mouse look up/down, radians
   let mouseLook = false;  // only true while the pointer is locked
@@ -2137,7 +2331,7 @@ function mountMaze(ctx) {
     healthBar.set(health / PLAYER_HEALTH);
     sprintBar.set(sprint.value / STAMINA_MAX, !sprint.active && sprint.value < SPRINT_FLOOR);
 
-    const aimed = pickTarget(maze, walker, monsters, weapon().range);
+    const aimed = weapon() ? pickTarget(maze, walker, monsters, weapon().range) : null;
     const shown = aimed || nearestMonster(monsters, walker);
     const hunting = monsters.some((m) => !m.dead && m.mode === 'hunt');
     foeBar.set(shown ? shown.health / MONSTER_HEALTH : 0,
@@ -2152,16 +2346,19 @@ function mountMaze(ctx) {
     sight.classList.toggle('is-aiming', sights > 0.5);
 
     const gun = weapon();
-    const left = rounds[held] === undefined ? gun.ammo : rounds[held];
-    const count = reloading > 0 ? 'reloading…' : `${left} / ${gun.ammo}`;
+    const label = gun ? gun.label : 'Unarmed';
+    const left = gun ? (rounds[held] === undefined ? gun.ammo : rounds[held]) : 0;
+    const count = !gun ? 'find a gun'
+      : reloading > 0 ? 'reloading…' : `${left} / ${gun.ammo}`;
     // Sixty times a second, so only touch the DOM when it actually changes.
-    if (ammoName.textContent !== gun.label) ammoName.textContent = gun.label;
+    if (ammoName.textContent !== label) ammoName.textContent = label;
     if (ammoCount.textContent !== count) ammoCount.textContent = count;
-    ammoBox.classList.toggle('is-empty', !left && reloading <= 0);
+    ammoBox.classList.toggle('is-empty', Boolean(gun) && !left && reloading <= 0);
+    ammoBox.classList.toggle('is-unarmed', !gun);
     ammoBox.classList.toggle('is-reloading', reloading > 0);
 
     // One pip per gun you are carrying, the one in hand lit.
-    if (ammoSlots.childElementCount !== packSize()) {
+    if (ammoSlots.childElementCount !== carried.length) {
       ammoSlots.replaceChildren(...loadout().map(() => {
         const pip = document.createElement('i');
         pip.className = 'ammo__pip';
@@ -2224,7 +2421,10 @@ function mountMaze(ctx) {
        smoke, and the sun goes from evening gold to furnace orange. Nothing is
        rebuilt, so it costs a handful of colour values and no geometry. */
     const paint = area.tint || {};
-    scene.fog = new THREE.Fog(paint.fog === undefined ? 0xc9b79c : paint.fog, 14, 80);
+    scene.fog = new THREE.Fog(
+      paint.fog === undefined ? 0xc9b79c : paint.fog,
+      paint.fogNear === undefined ? 14 : paint.fogNear,
+      paint.fogFar === undefined ? 80 : paint.fogFar);
 
     camera = new THREE.PerspectiveCamera(MAZE_FOV, 16 / 10, 0.05, 220);
 
@@ -2402,6 +2602,7 @@ function mountMaze(ctx) {
 
     fitWeapon();
     warmLoadout();
+    buildPickups();
 
     /* The creatures — one per monster, paired by index.
 
@@ -2501,6 +2702,45 @@ function mountMaze(ctx) {
      and the model replaces it when it turns up. Asking for a weapon twice in
      quick succession is fine: the check on the way back makes sure only the
      answer for the weapon still selected is used. */
+  /* Something lying on the floor: a white box with a red cross for a bandage,
+     a small dark case for a gun. Both float and turn, which is the cheapest
+     way to make a static object read as "pick me up" — and in the Mist, where
+     you cannot see five squares, movement is most of what draws the eye. */
+  function buildPickups() {
+    pickupMeshes.forEach((m) => scene.remove(m));
+    pickupMeshes = pickups.map((pickup) => {
+      const group = new THREE.Group();
+
+      if (pickup.kind === 'bandage') {
+        const box = new THREE.Mesh(
+          new THREE.BoxGeometry(0.2, 0.1, 0.14),
+          new THREE.MeshLambertMaterial({ color: 0xf8fafc }));
+        group.add(box);
+        const across = new THREE.MeshBasicMaterial({ color: 0xef4444 });
+        const bar = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.035, 0.145), across);
+        bar.position.z = 0.001;
+        group.add(bar);
+        const up = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.105, 0.145), across);
+        up.position.z = 0.001;
+        group.add(up);
+      } else {
+        const crate = new THREE.Mesh(
+          new THREE.BoxGeometry(0.26, 0.09, 0.16),
+          new THREE.MeshLambertMaterial({ color: 0x3f4650 }));
+        group.add(crate);
+        const lid = new THREE.Mesh(
+          new THREE.BoxGeometry(0.27, 0.02, 0.17),
+          new THREE.MeshBasicMaterial({ color: 0xfbbf24 }));
+        lid.position.y = 0.055;
+        group.add(lid);
+      }
+
+      group.position.set(pickup.x, 0.3, pickup.y);
+      scene.add(group);
+      return group;
+    });
+  }
+
   /* Fetch every gun in the loadout, not only the one in hand.
 
      Switching weapons should be instant, and a model arriving a moment late
@@ -2510,11 +2750,21 @@ function mountMaze(ctx) {
      all three. */
   function warmLoadout() {
     for (const gun of loadout()) loadWeaponModel(gun);
+
+    /* And whatever is lying on the floor. In the Mist you start with nothing,
+       so there is no loadout to warm — the first gun you find would otherwise
+       arrive a beat after you picked it up. */
+    for (const pickup of pickups) {
+      if (pickup.kind !== 'weapon' || pickup.taken) continue;
+      const gun = MAZE_WEAPONS.find((w) => w.id === pickup.weapon);
+      if (gun) loadWeaponModel(gun);
+    }
   }
 
   function fitWeapon() {
     if (!gunRig) return;
     const wanted = weapon();
+    if (!wanted) { gunRig.clear(); gunModel = null; return; }   // empty hands
 
     gunRig.clear();
     gunModel = null;
@@ -2561,6 +2811,7 @@ function mountMaze(ctx) {
     });
     if (camera) camera.clear();
     creatures = [];
+    pickupMeshes = [];
     gunScene = null;
     gunCamera = null;
     gunRig = null;
@@ -2710,10 +2961,13 @@ function mountMaze(ctx) {
         health -= MONSTER_DAMAGE * Math.min(2, mauling) * dt;
         if (Math.random() < dt * 2) audio.play('hurt');
         if (health <= 0) return killed();
-      } else if (near < 0.2 && health < PLAYER_HEALTH) {
+      } else if (area.regen && near < 0.2 && health < PLAYER_HEALTH) {
+        // Only where the area allows it. Elsewhere you mend by finding something.
         health = Math.min(PLAYER_HEALTH, health + HEALTH_REGEN * dt);
       }
     }
+
+    if (!dead && !courseDone) collect();
 
     refreshBars(near);
 
@@ -2726,6 +2980,15 @@ function mountMaze(ctx) {
     // The walls are lit only by the sky, with no flicker on them at all.
     if (exitGlow) exitGlow.intensity = 1.4 + Math.sin(seconds * 3) * 0.5;
     if (exitPillar) exitPillar.rotation.y += dt * 0.6;
+
+    pickupMeshes.forEach((mesh, i) => {
+      const pickup = pickups[i];
+      if (!pickup) return;
+      mesh.visible = !pickup.taken;
+      if (!mesh.visible) return;
+      mesh.rotation.y = seconds * 1.4 + pickup.phase;
+      mesh.position.y = 0.3 + Math.sin(seconds * 2.2 + pickup.phase) * 0.045;
+    });
 
     /* Each creature follows its own monster, always facing you and lurching a
        little as it walks. The lurch is offset per index so a pack does not move
@@ -2754,7 +3017,7 @@ function mountMaze(ctx) {
       /* Two places the weapon can be — at the hip and at the eye — and it
          slides between them. Sway and recoil are damped right down while the
          sights are up, or aiming would be no steadier than not. */
-      const hip = weapon().at;
+      const hip = (weapon() || MAZE_WEAPONS[0]).at;
       const steady = 1 - sights * 0.8;
       for (let i = 0; i < 3; i++) gunAt[i] = hip[i] + (ADS_AT[i] - hip[i]) * sights;
 
@@ -2776,7 +3039,7 @@ function mountMaze(ctx) {
 
     if (flat) {
       drawRaycast(flat, maze, walker, pitch, flatCanvas.width, flatCanvas.height, monsters, recoil,
-        area.tint && area.tint.wash);
+        area.tint, pickups);
     } else {
       camera.position.set(walker.x, eye, walker.y);
       camera.rotation.set(pitch, -walker.yaw - Math.PI / 2, 0, 'YXZ');
@@ -2787,7 +3050,7 @@ function mountMaze(ctx) {
     if (mapAge >= MINIMAP_PERIOD) {
       mapAge = 0;
       drawMinimap(map2d, maze, walker, MINIMAP_PX, monsters,
-        (area.tint && area.tint.map) || undefined);
+        (area.tint && area.tint.map) || undefined, pickups);
     }
     scoreRow.set('time', clock(seconds));
 
@@ -2842,7 +3105,7 @@ function mountMaze(ctx) {
     const sink = EYE_HEIGHT - deathTurn * 0.22;   // knees giving way
     if (flat) {
       drawRaycast(flat, maze, walker, pitch, flatCanvas.width, flatCanvas.height, monsters, 0,
-        area.tint && area.tint.wash);
+        area.tint, pickups);
     } else if (renderer) {
       if (gunRig) gunRig.visible = false;         // you have dropped it
       camera.position.set(walker.x, sink, walker.y);
@@ -2852,6 +3115,34 @@ function mountMaze(ctx) {
 
     // Once it has finished turning there is nothing left to animate.
     if (deathTurn >= 1) stop();
+  }
+
+  /* Walk over something and it is yours. A bandage mends you on the spot; a
+     gun goes on your belt, and is put straight into your hands if they were
+     empty — which in the Mist is how you get your first one. */
+  function collect() {
+    for (const pickup of takePickups(pickups, walker)) {
+      if (pickup.kind === 'bandage') {
+        health = Math.min(PLAYER_HEALTH, health + BANDAGE_HEAL);
+        audio.play('match');
+        ctx.setStatus(`Bandage — ${Math.round(health)} of ${PLAYER_HEALTH}`);
+        continue;
+      }
+
+      const gun = MAZE_WEAPONS.find((w) => w.id === pickup.weapon);
+      if (!gun || carried.includes(gun)) continue;
+
+      const first = carried.length === 0;
+      carried.push(gun);
+      rounds.push(gun.ammo);
+      audio.play('win');
+      if (first) {
+        held = 0;
+        fitWeapon();
+      }
+      ctx.setStatus(first ? `${gun.label} — you are armed`
+        : `${gun.label} picked up · ${carried.length} guns`);
+    }
   }
 
   // Out of health. The run ends wherever you were in it.
@@ -2884,7 +3175,7 @@ function mountMaze(ctx) {
 
   // Take out a different gun. Each keeps whatever it had left in it.
   function takeOut(index) {
-    const next = Math.max(0, Math.min(packSize() - 1, index));
+    const next = Math.max(0, Math.min(carried.length - 1, index));
     if (next === held || dead) return;
     held = next;
     reloading = 0;
@@ -2896,7 +3187,7 @@ function mountMaze(ctx) {
   // Refill whatever is in your hands. There is no shortage of ammunition —
   // the magazine is the limit, not the supply.
   function reload() {
-    if (dead || courseDone || reloading > 0) return;
+    if (dead || courseDone || reloading > 0 || !armed()) return;
     if (rounds[held] >= weapon().ammo) return;
     reloading = weapon().reload;
     audio.play('drop');
@@ -2906,12 +3197,14 @@ function mountMaze(ctx) {
      trigger. */
   function fire() {
     if (dead || courseDone || shotTimer > 0 || reloading > 0) return;
+    if (!armed()) return;                   // nothing in your hands at all
 
-    // Out of rounds: a dry click, and it starts reloading by itself.
+    /* Out of rounds: a dry click and nothing else. Reloading is yours to do —
+       a gun that quietly refills itself the moment you need it takes the
+       decision away, and the decision is the point. */
     if (!rounds[held]) {
       shotTimer = weapon().cooldown;
-      audio.play('click');   // the dry click of an empty gun
-      reload();
+      audio.play('click');
       return;
     }
 
@@ -2983,10 +3276,16 @@ function mountMaze(ctx) {
     walker = createWalker(maze);
     monsters = Array.from({ length: packSize() },
       () => createMonster(maze, walker));
-    // A gun apiece, all of them loaded.
-    rounds = loadout().map((w) => w.ammo);
-    held = Math.min(held, packSize() - 1);
+
+    /* Armed areas hand you a gun per monster, loaded. The Mist hands you
+       nothing and leaves them lying about instead — and what you found in the
+       last maze you keep, because losing it at every door would be miserable. */
+    if (area.armed) carried = MAZE_WEAPONS.slice(0, packSize());
+    rounds = carried.map((w) => w.ammo);
+    held = Math.max(0, Math.min(held, carried.length - 1));
     reloading = 0;
+
+    pickups = scatterPickups(maze, walker, area);
     health = PLAYER_HEALTH;
     sprint.value = STAMINA_MAX;
     refreshBars(0);
@@ -3023,6 +3322,7 @@ function mountMaze(ctx) {
     seconds = 0;
     courseDone = false;
     dead = false;
+    carried = [];        // the Mist starts you empty; loadLevel arms the rest
     killer = null;
     deathTurn = 0;
     recoil = 0;
@@ -3168,7 +3468,8 @@ function mountMaze(ctx) {
   function onWheel(event) {
     if (!running || dead) return;
     event.preventDefault();
-    takeOut((held + (event.deltaY > 0 ? 1 : -1) + packSize()) % packSize());
+    if (carried.length < 2) return;
+    takeOut((held + (event.deltaY > 0 ? 1 : -1) + carried.length) % carried.length);
   }
 
   // Right-clicking a game should aim, not open a menu over it.
@@ -3254,6 +3555,7 @@ if (typeof module !== 'undefined') {
     paintBrick, paintBrickNormal, paintCap, paintFloor, paintFur, paintFace, paintGun, paintSky,
     stepMonster, monsterCloseness, pickTarget, nearestMonster,
     monsterSees, monsterHears, alertMonsters, pickSearchTarget, openCells,
+    scatterPickups, takePickups, BANDAGE_HEAL, PICKUP_REACH, PICKUP_CLEAR,
     SIGHT_RANGE, SIGHT_CONE, HEAR_WALK, HEAR_SPRINT, SHOT_NOISE, LOSE_PATIENCE,
     shotHits, clearLine, stepSprint,
     MONSTER_SPEED, MONSTER_MIN_START, MONSTER_REACH, MONSTER_DAMAGE, RESPAWN_MIN,
