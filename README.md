@@ -126,9 +126,17 @@ the exit, and never two to a square: walking over one and silently collecting
 three would be worse than finding none. Every one is checked to be reachable
 from the start.
 
-They show on the minimap only within seven squares. Marking every bandage in
-the maze would turn a search into a shopping list, and in the Mist it would
-undo the fog entirely.
+What the minimap gives away is each area's own business. The Foundry marks
+every bandage; the Mist marks the guns as well, because somewhere you start
+unarmed, cannot mend on your own and cannot see five squares, being left to
+stumble on the only weapon in reach is tedium rather than tension. Anything not
+marked still appears once you are within seven squares of it, and anything
+marked but far off is drawn dimmer, so the map still tells you how close you
+are.
+
+Five things can appear on that map and every one has to be told apart at a
+glance: **you** are amber, **the exit** green, **a monster** red, **a bandage**
+white and **a gun** cyan.
 
 The whole loadout is fetched when an area loads — and in the Mist, so are the
 guns lying on the floor, since there is no loadout to fetch and the first one

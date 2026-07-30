@@ -138,6 +138,7 @@ const MAZE_AREAS = [
     regen: true,                   // and mend on your own once it loses you
     bandages: 0,
     scatterWeapons: false,
+    mapShows: 'near',              // nothing to mark anyway
     tint: null,                    // as the textures were painted
   },
   {
@@ -150,6 +151,7 @@ const MAZE_AREAS = [
     regen: false,                  // nothing mends on its own down here
     bandages: 7,                   // so there are bandages lying about instead
     scatterWeapons: false,
+    mapShows: 'bandages',          // and the map knows where all of them are
     /* The same maze under a different light. Nothing about the place is
        rebuilt — the surfaces keep their own textures and are lit and tinted
        red, the fog is turned to smoke, and the 2D fallback lays a wash over
@@ -181,6 +183,10 @@ const MAZE_AREAS = [
     regen: false,
     bandages: 9,
     scatterWeapons: true,          // and the guns are out there somewhere too
+    /* The map marks every one of them. Somewhere you start unarmed, cannot
+       mend on your own and cannot see five squares, being left to stumble on
+       the only gun in reach is not tension, it is tedium. */
+    mapShows: 'all',
     /* White out to a few squares. The fog does the work here rather than the
        tint: surfaces are barely touched, but nothing is visible past about
        twenty squares and the walls are gone by ten. */
@@ -879,7 +885,7 @@ function monsterCloseness(monster, walker) {
    Deliberately nothing else — no walls, no unexplored ground and above all no
    route to the exit, so it helps you keep track without solving the maze for
    you. */
-function drawMinimap(g, maze, walker, size, monsters, backdrop = 'rgba(6, 11, 25, 0.72)', pickups = null) {
+function drawMinimap(g, maze, walker, size, monsters, backdrop = 'rgba(6, 11, 25, 0.72)', pickups = null, shows = 'near') {
   const cell = size / Math.max(maze.w, maze.h);
 
   g.clearRect(0, 0, size, size);
@@ -893,15 +899,29 @@ function drawMinimap(g, maze, walker, size, monsters, backdrop = 'rgba(6, 11, 25
     g.fillRect(keyX(key) * cell, keyY(key) * cell, box, box);
   }
 
-  /* Pickups, but only ones you are nearly on top of. Marking every bandage in
-     the maze would turn a search into a shopping list — and in the Mist, where
-     you cannot see past a few squares, it would undo the fog entirely. */
+  /* Pickups. What an area gives away is the area's own business: the Foundry
+     marks every bandage, the Mist marks the guns as well, and anywhere else
+     you only see what you are nearly standing on.
+
+     Something marked but far off is drawn dimmer than something within reach,
+     so the map still says how close you are to it. */
   const dot = Math.max(2, cell * 1.1);
   for (const pickup of pickups || []) {
     if (pickup.taken) continue;
-    if (Math.hypot(pickup.x - walker.x, pickup.y - walker.y) > 7) continue;
-    g.fillStyle = pickup.kind === 'bandage' ? '#f8fafc' : '#fbbf24';
+
+    const marked = shows === 'all'
+      || (shows === 'bandages' && pickup.kind === 'bandage');
+    const near = Math.hypot(pickup.x - walker.x, pickup.y - walker.y) <= 7;
+    if (!marked && !near) continue;
+
+    /* Five things can appear on this map and every one of them has to be
+       told apart at a glance: you are amber, the exit is green, a monster is
+       red, a bandage is white and a gun is cyan. Guns were amber to match
+       their crate, which put them in the same colour as the player marker. */
+    g.globalAlpha = near ? 1 : 0.55;
+    g.fillStyle = pickup.kind === 'bandage' ? '#f8fafc' : '#38bdf8';
     g.fillRect(pickup.x * cell - dot / 2, pickup.y * cell - dot / 2, dot, dot);
+    g.globalAlpha = 1;
   }
 
   // The exit.
@@ -3170,7 +3190,7 @@ function mountMaze(ctx) {
     if (mapAge >= MINIMAP_PERIOD) {
       mapAge = 0;
       drawMinimap(map2d, maze, walker, MINIMAP_PX, monsters,
-        (area.tint && area.tint.map) || undefined, pickups);
+        (area.tint && area.tint.map) || undefined, pickups, area.mapShows);
     }
     scoreRow.set('time', clock(seconds));
 
