@@ -138,7 +138,7 @@ const MAZE_PACKS = [1, 2, 3, 4, 5];
 
 const WALKER_RADIUS = 0.26;    // in cells; keeps you off the wall faces
 const WALK_SPEED = 2.5;        // cells per second
-const SPRINT_MULTIPLIER = 1.7; // while space is held
+const SPRINT_MULTIPLIER = 1.4; // while space is held
 const TURN_SPEED = 2.4;        // radians per second
 const MOUSE_SENSITIVITY = 0.0026;
 const MAX_PITCH = 0.9;         // radians you can look up or down

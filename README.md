@@ -198,8 +198,9 @@ that many squares, so it is barely retreading. (Preferring the *nearest*
 unvisited square sounds tidier and measured much worse: short hops mean it
 spends its time re-pathing and shuffling around one junction.)
 
-It moves at 2.05 squares a second against your 2.5 walking and 4.25 sprinting —
-quicker than it, but not by much, and only while the bar lasts.
+It moves at 2.05 squares a second against your 2.5 walking and 3.5 sprinting —
+quicker than it, but not by much, and only while the bar lasts. Walking you
+gain less than half a square a second on one; sprinting, about one and a half.
 It spawns at least eight squares away and never near the exit, so you are never
 made to walk into one to finish.
 
