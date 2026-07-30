@@ -105,6 +105,15 @@ nothing exists past twenty. In the 2D fallback that is one gradient banded
 across the horizon rather than per-pixel fog: everything far away projects
 close to the horizon, so whitening that band reads as depth and costs one fill.
 
+Distance fog alone is not enough, and the first attempt proved it. Fading the
+walls into white while a dusk gradient sat overhead read as *haze*, not
+weather — you cannot see a clear evening sky through fog. So in the Mist there
+is no sky: the dome is flat, in the fog's own colour, and the fallback paints
+the same overhead. On top of that, twenty-two **banks of it drift round you**
+as camera-facing sprites, recycled as you walk out of them, with seven soft
+ellipses doing the same job in the fallback. Fog you walk through reads as fog;
+fog at a distance reads as a filter.
+
 You walk into it **carrying nothing**. Five guns are out there somewhere along
 with the bandages, and the first one you trip over is the one you fight with.
 

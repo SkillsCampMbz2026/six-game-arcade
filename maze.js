@@ -197,6 +197,10 @@ const MAZE_AREAS = [
       sun: 0xf4f8ff,
       fill: 0xcfd8dd,
       exit: 0x22c55e,              // a deeper green, to carry through the white
+      /* No sky. You cannot see a dusk gradient through fog this thick, and
+         leaving one up there was what made the place read as merely hazy. */
+      blankSky: true,
+      banks: 22,                   // drifting sprites of it, hung round you
       wash: 'rgba(228, 238, 242, 0.3)',
       map: 'rgba(28, 36, 40, 0.72)',
     },
@@ -1036,7 +1040,7 @@ function blend(a, b, t) {
   return `rgb(${Math.round(ar + (br - ar) * k)}, ${Math.round(ag + (bg - ag) * k)}, ${Math.round(ab + (bb - ab) * k)})`;
 }
 
-function drawRaycast(g, maze, walker, pitch, width, height, monsters, recoil = 0, air = null, pickups = null) {
+function drawRaycast(g, maze, walker, pitch, width, height, monsters, recoil = 0, air = null, pickups = null, clock = 0) {
   const fov = (MAZE_FOV * Math.PI) / 180;
   const planeHalf = Math.tan(fov / 2);
   const project = width / 2 / planeHalf;         // world units to pixels at 1 away
@@ -1046,6 +1050,18 @@ function drawRaycast(g, maze, walker, pitch, width, height, monsters, recoil = 0
   const dirY = Math.sin(walker.yaw);
   const planeX = -dirY * planeHalf;
   const planeY = dirX * planeHalf;
+
+  /* Where the fog is thick there is no sky to speak of — just more of it.
+     Painting the dusk gradient up there and whitening only the walls is what
+     made the Mist read as haze rather than as weather. */
+  if (air && air.blankSky) {
+    const [fr, fg, fb] = [(air.fog >> 16) & 255, (air.fog >> 8) & 255, air.fog & 255];
+    const overhead = g.createLinearGradient(0, 0, 0, Math.max(1, horizon));
+    overhead.addColorStop(0, `rgb(${Math.round(fr * 0.86)}, ${Math.round(fg * 0.88)}, ${Math.round(fb * 0.9)})`);
+    overhead.addColorStop(1, `rgb(${fr}, ${fg}, ${fb})`);
+    g.fillStyle = overhead;
+    g.fillRect(0, 0, width, Math.max(0, horizon));
+  } else {
 
   // Dusk above the horizon, dark tiled ground below it.
   const sky = g.createLinearGradient(0, 0, 0, Math.max(1, horizon));
@@ -1067,6 +1083,7 @@ function drawRaycast(g, maze, walker, pitch, width, height, monsters, recoil = 0
     const sy = (star >>> 8) % Math.max(1, Math.floor(horizon * 0.4));
     g.fillStyle = `rgba(255, 255, 255, ${0.2 + ((star >>> 20) % 40) / 100})`;
     g.fillRect(sx, sy, 1, 1);
+  }
   }
 
   const ground = g.createLinearGradient(0, horizon, 0, height);
@@ -1315,6 +1332,30 @@ function drawRaycast(g, maze, walker, pitch, width, height, monsters, recoil = 0
     band.addColorStop(1, `rgba(${hazeRGB[0]}, ${hazeRGB[1]}, ${hazeRGB[2]}, 0)`);
     g.fillStyle = band;
     g.fillRect(0, horizon - reach, width, reach * 2);
+  }
+
+  /* Banks of mist drifting across the view, over everything except your own
+     hands. Soft ellipses rather than anything clever: at this opacity, and
+     moving, that is all it takes to turn a distance fade into weather. */
+  if (air && air.banks) {
+    const [fr, fg, fb] = [(air.fog >> 16) & 255, (air.fog >> 8) & 255, air.fog & 255];
+    for (let i = 0; i < 7; i++) {
+      const lane = i / 7;
+      // Each bank drifts at its own pace and wraps round the view.
+      const drift = ((clock * (0.02 + lane * 0.03) + lane) % 1.4) - 0.2;
+      const cx = drift * width;
+      const cy = horizon + Math.sin(lane * 5.2) * height * 0.12;
+      const rx = width * (0.22 + lane * 0.16);
+      const ry = height * (0.09 + (i % 3) * 0.04);
+      const puff = g.createRadialGradient(cx, cy, 0, cx, cy, rx);
+      puff.addColorStop(0, `rgba(${fr}, ${fg}, ${fb}, 0.3)`);
+      puff.addColorStop(0.6, `rgba(${fr}, ${fg}, ${fb}, 0.12)`);
+      puff.addColorStop(1, `rgba(${fr}, ${fg}, ${fb}, 0)`);
+      g.fillStyle = puff;
+      g.beginPath();
+      g.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+      g.fill();
+    }
   }
 
   /* The area's own light, laid over the finished frame. One fill rather than
@@ -1965,6 +2006,41 @@ function paintBrickNormal(g, size) {
   }
 }
 
+
+/* A soft blob, for the drifting banks of mist.
+
+   Fog on its own is a distance fade — the further a thing is the more of the
+   fog colour it takes, and that reads as haze rather than as weather. What
+   makes fog look like fog is banks of it moving past you, so these are hung
+   around the player as camera-facing sprites and drift. */
+function paintMist(g, size) {
+  const half = size / 2;
+  const cloud = g.createRadialGradient(half, half, 0, half, half, half);
+  cloud.addColorStop(0, 'rgba(255, 255, 255, 0.5)');
+  cloud.addColorStop(0.45, 'rgba(255, 255, 255, 0.26)');
+  cloud.addColorStop(0.78, 'rgba(255, 255, 255, 0.07)');
+  cloud.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  g.fillStyle = cloud;
+  g.fillRect(0, 0, size, size);
+
+  /* Lumpy rather than a clean disc: several softer blobs inside the first, so
+     two overlapping sprites do not read as two circles. */
+  let n = 60013;
+  for (let i = 0; i < 7; i++) {
+    n = (n * 1664525 + 1013904223) >>> 0;
+    const x = ((n >>> 4) % size);
+    const y = ((n >>> 13) % size);
+    const r = size * (0.1 + ((n >>> 22) % 20) / 100);
+    const fromMiddle = Math.hypot(x - half, y - half) / half;
+    if (fromMiddle > 0.7) continue;                 // keep the edges soft
+    const blob = g.createRadialGradient(x, y, 0, x, y, r);
+    blob.addColorStop(0, `rgba(255, 255, 255, ${0.16 * (1 - fromMiddle)})`);
+    blob.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    g.fillStyle = blob;
+    g.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+}
+
 /* Wrapped as three.js textures for the WebGL scene. */
 function makeTextures() {
   if (textures) return textures;
@@ -1976,6 +2052,7 @@ function makeTextures() {
   const fur = paintCanvas(128, paintFur);
   const face = paintCanvas(FACE_TEX, paintFace);
   const gun = paintCanvas(GUN_TEX, paintGun);
+  const mist = paintCanvas(128, paintMist);
   const sky = paintCanvas(512, paintSky);
   sky.wrapS = THREE.ClampToEdgeWrapping;
   sky.wrapT = THREE.ClampToEdgeWrapping;
@@ -1988,7 +2065,7 @@ function makeTextures() {
   gun.minFilter = THREE.NearestFilter;
   gun.generateMipmaps = false;
 
-  textures = { brick, relief, cap, floor, fur, face, gun, sky };
+  textures = { brick, relief, cap, floor, fur, face, gun, mist, sky };
   return textures;
 }
 
@@ -2188,6 +2265,7 @@ function mountMaze(ctx) {
   let exitGlow = null;
   let creatures = [];       // one group per monster, paired by index
   let pickupMeshes = [];    // one per pickup, paired by index
+  let banks = [];           // drifting mist sprites, in areas that have them
   let monsterModel = null;  // the supplied .glb, once it has arrived
   let pitch = 0;          // mouse look up/down, radians
   let mouseLook = false;  // only true while the pointer is locked
@@ -2429,12 +2507,18 @@ function mountMaze(ctx) {
     camera = new THREE.PerspectiveCamera(MAZE_FOV, 16 / 10, 0.05, 220);
 
     // Sky: a big sphere seen from the inside, unaffected by fog.
+    /* Where the fog is thick the sky goes with it: a flat dome in the fog's
+       own colour, no texture. Leaving the dusk gradient up there is what made
+       the Mist read as haze — walls fading into white under a clear evening
+       sky, which is not a thing that happens. */
     const skyDome = new THREE.Mesh(
       new THREE.SphereGeometry(110, 32, 20),
-      new THREE.MeshBasicMaterial({
-        map: skin.sky, side: THREE.BackSide, fog: false,
-        color: paint.sky === undefined ? 0xffffff : paint.sky,
-      }));
+      paint.blankSky
+        ? new THREE.MeshBasicMaterial({ color: paint.fog, side: THREE.BackSide, fog: false })
+        : new THREE.MeshBasicMaterial({
+          map: skin.sky, side: THREE.BackSide, fog: false,
+          color: paint.sky === undefined ? 0xffffff : paint.sky,
+        }));
     skyDome.position.set(maze.w / 2, 0, maze.h / 2);
     scene.add(skyDome);
 
@@ -2603,6 +2687,29 @@ function mountMaze(ctx) {
     fitWeapon();
     warmLoadout();
     buildPickups();
+
+    /* Banks of mist, as camera-facing sprites hung round the player and
+       recycled as you walk out of them. Distance fog alone is a fade; what
+       makes weather read as weather is having some of it drift past you. */
+    banks = [];
+    if (paint.banks) {
+      const material = new THREE.SpriteMaterial({
+        map: skin.mist,
+        color: paint.fog,
+        transparent: true,
+        depthWrite: false,
+        opacity: 0.55,
+        fog: false,          // it IS the fog; fading it into itself does nothing
+      });
+      for (let i = 0; i < paint.banks; i++) {
+        const bank = new THREE.Sprite(material);
+        const spread = 3 + (i / paint.banks) * 9;
+        bank.scale.setScalar(2.6 + (i % 4) * 1.1);
+        bank.userData = { spread, turn: (i / paint.banks) * Math.PI * 2, drift: 0.06 + (i % 5) * 0.02 };
+        banks.push(bank);
+        scene.add(bank);
+      }
+    }
 
     /* The creatures — one per monster, paired by index.
 
@@ -2812,6 +2919,7 @@ function mountMaze(ctx) {
     if (camera) camera.clear();
     creatures = [];
     pickupMeshes = [];
+    banks = [];
     gunScene = null;
     gunCamera = null;
     gunRig = null;
@@ -2981,6 +3089,18 @@ function mountMaze(ctx) {
     if (exitGlow) exitGlow.intensity = 1.4 + Math.sin(seconds * 3) * 0.5;
     if (exitPillar) exitPillar.rotation.y += dt * 0.6;
 
+    /* The banks circle the player slowly and bob, so you are always walking
+       into some of them. Kept near you rather than scattered through the maze:
+       fog you cannot reach is just a texture on the far wall. */
+    for (const bank of banks) {
+      const state = bank.userData;
+      state.turn += dt * state.drift;
+      bank.position.set(
+        walker.x + Math.cos(state.turn) * state.spread,
+        0.55 + Math.sin(seconds * 0.35 + state.spread) * 0.25,
+        walker.y + Math.sin(state.turn) * state.spread);
+    }
+
     pickupMeshes.forEach((mesh, i) => {
       const pickup = pickups[i];
       if (!pickup) return;
@@ -3039,7 +3159,7 @@ function mountMaze(ctx) {
 
     if (flat) {
       drawRaycast(flat, maze, walker, pitch, flatCanvas.width, flatCanvas.height, monsters, recoil,
-        area.tint, pickups);
+        area.tint, pickups, seconds);
     } else {
       camera.position.set(walker.x, eye, walker.y);
       camera.rotation.set(pitch, -walker.yaw - Math.PI / 2, 0, 'YXZ');
@@ -3105,7 +3225,7 @@ function mountMaze(ctx) {
     const sink = EYE_HEIGHT - deathTurn * 0.22;   // knees giving way
     if (flat) {
       drawRaycast(flat, maze, walker, pitch, flatCanvas.width, flatCanvas.height, monsters, 0,
-        area.tint, pickups);
+        area.tint, pickups, seconds);
     } else if (renderer) {
       if (gunRig) gunRig.visible = false;         // you have dropped it
       camera.position.set(walker.x, sink, walker.y);
@@ -3552,7 +3672,7 @@ if (typeof module !== 'undefined') {
     MAZE_AREAS, areaById, WALKER_RADIUS, WALK_SPEED, TURN_SPEED, SPRINT_MULTIPLIER,
     drawRaycast, drawMinimap, drawGun, cellKey, keyX, keyY, MAZE_FOV, WALL_HEIGHT, EYE_HEIGHT,
     makeTextures, drawCreature, createMonster, respawnMonster, spawnSpot,
-    paintBrick, paintBrickNormal, paintCap, paintFloor, paintFur, paintFace, paintGun, paintSky,
+    paintBrick, paintBrickNormal, paintCap, paintFloor, paintFur, paintFace, paintGun, paintSky, paintMist,
     stepMonster, monsterCloseness, pickTarget, nearestMonster,
     monsterSees, monsterHears, alertMonsters, pickSearchTarget, openCells,
     scatterPickups, takePickups, BANDAGE_HEAL, PICKUP_REACH, PICKUP_CLEAR,
