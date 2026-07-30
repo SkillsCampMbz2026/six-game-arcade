@@ -60,6 +60,7 @@ body {
 .game[data-theme="race"]  { --x: #fbbf24; --o: #38bdf8; }
 .game[data-theme="cards"] { --x: #a78bfa; --o: #f472b6; }
 .game[data-theme="maze"]  { --x: #4ade80; --o: #fbbf24; }
+.game[data-theme="foundry"] { --x: #fb7185; --o: #fbbf24; }
 
 .titlebar {
   position: relative;

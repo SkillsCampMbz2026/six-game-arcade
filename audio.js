@@ -161,11 +161,11 @@ const audio = (() => {
 
       // Only a gun that hits hard gets a boom, and only a small one.
       if (hit > 0.2) {
-        tone({ freq: 96 - hit * 46, to: 34, dur: 0.14 + hit * 0.16, type: 'sine', gain: 0.05 + hit * 0.1 });
+        tone({ freq: 96 - hit * 46, to: 34, dur: 0.15 + hit * 0.18, type: 'sine', gain: 0.07 + hit * 0.15 });
         hiss({
           dur: 0.2 + hit * 0.28,
           freq: 340,
-          gain: 0.02 + hit * 0.045,
+          gain: 0.025 + hit * 0.055,
           type: 'lowpass',
           delay: 0.05 + hit * 0.04,
         });

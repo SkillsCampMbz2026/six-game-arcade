@@ -118,23 +118,51 @@ const BRICK_TEX = 256;   // texture edge, in pixels
 const FACE_TEX = 256;    // the creature's face, likewise
 const GUN_TEX = 256;     // and the gun in your hands
 
-/* Pick a size and you get a run of three mazes at that scale, each a little
-   bigger than the last. Escaping one drops you straight into the next; the
-   clock runs across the whole run, and only finishing all three completes it.
+/* Areas.
 
-   Even "small" is a big maze — the numbers are cells square, so a 16 is a
-   33x33 grid and a 52 is a 105x105 one. */
-const MAZE_COURSES = [
-  { id: 'small', label: 'Small', levels: [16, 20, 24] },
-  { id: 'medium', label: 'Medium', levels: [24, 30, 36] },
-  { id: 'large', label: 'Large', levels: [36, 44, 52] },
+   An area is a whole place rather than a difficulty dial: it fixes how big its
+   mazes are, how many of them there are, how many things are hunting you — and
+   therefore how many guns you carry, since that is one apiece — and what the
+   place looks like.
+
+   The numbers are cells square, so a 16 is a 33x33 grid and a 36 is a 73x73. */
+const MAZE_AREAS = [
+  {
+    id: 'stone',
+    label: 'Stone Maze',
+    monsters: 1,
+    levels: [16, 20, 24],          // three, small
+    theme: 'maze',
+    tint: null,                    // as the textures were painted
+  },
+  {
+    id: 'foundry',
+    label: 'The Foundry',
+    monsters: 3,
+    levels: [24, 27, 30, 33, 36],  // five, medium
+    theme: 'foundry',
+    /* The same maze under a different light. Nothing about the place is
+       rebuilt — the surfaces keep their own textures and are simply lit and
+       tinted red, the fog is turned to smoke, and the 2D fallback lays a wash
+       over the finished frame to match. */
+    tint: {
+      surface: 0xffab92,           // multiplies the wall and floor textures
+      floor: 0xff9d84,
+      coping: 0xffbda6,
+      sky: 0xffb499,
+      fog: 0x7a3a2c,
+      hemiSky: 0xffc4a8,
+      hemiGround: 0x4a1f16,
+      sun: 0xff9457,
+      fill: 0xd4674a,
+      exit: 0x86efac,              // the way out stays green, or you would lose it
+      wash: 'rgba(196, 62, 28, 0.17)',
+      map: 'rgba(38, 10, 6, 0.72)',
+    },
+  },
 ];
 
-const courseById = (id) => MAZE_COURSES.find((c) => c.id === id) || MAZE_COURSES[1];
-
-/* How many are hunting you. They share the maze rather than the health bar:
-   each one has its own hundred points and its own route to you. */
-const MAZE_PACKS = [1, 2, 3, 4, 5];
+const areaById = (id) => MAZE_AREAS.find((a) => a.id === id) || MAZE_AREAS[0];
 
 const WALKER_RADIUS = 0.26;    // in cells; keeps you off the wall faces
 const WALK_SPEED = 2.5;        // cells per second
@@ -738,11 +766,11 @@ function monsterCloseness(monster, walker) {
    Deliberately nothing else — no walls, no unexplored ground and above all no
    route to the exit, so it helps you keep track without solving the maze for
    you. */
-function drawMinimap(g, maze, walker, size, monsters) {
+function drawMinimap(g, maze, walker, size, monsters, backdrop = 'rgba(6, 11, 25, 0.72)') {
   const cell = size / Math.max(maze.w, maze.h);
 
   g.clearRect(0, 0, size, size);
-  g.fillStyle = 'rgba(6, 11, 25, 0.72)';
+  g.fillStyle = backdrop;
   g.fillRect(0, 0, size, size);
 
   // Where you have been.
@@ -888,7 +916,7 @@ function blend(a, b, t) {
   return `rgb(${Math.round(ar + (br - ar) * k)}, ${Math.round(ag + (bg - ag) * k)}, ${Math.round(ab + (bb - ab) * k)})`;
 }
 
-function drawRaycast(g, maze, walker, pitch, width, height, monsters, recoil = 0) {
+function drawRaycast(g, maze, walker, pitch, width, height, monsters, recoil = 0, wash = null) {
   const fov = (MAZE_FOV * Math.PI) / 180;
   const planeHalf = Math.tan(fov / 2);
   const project = width / 2 / planeHalf;         // world units to pixels at 1 away
@@ -1101,6 +1129,18 @@ function drawRaycast(g, maze, walker, pitch, width, height, monsters, recoil = 0
       g.fillStyle = `rgba(74, 222, 128, ${0.35 + edge * 0.5})`;
       g.fillRect(x, exit.y - size * 1.5, 1, size * 1.5);
     }
+  }
+
+  /* The area's own light, laid over the finished frame. One fill rather than
+     tinting every surface, which is all the 2D renderer needs and all it can
+     afford.
+
+     Under the gun, not over it: in the 3D view the weapon is drawn in its own
+     pass with its own lights and does not take the room's colour, so washing
+     it here would make the two renderers disagree. */
+  if (wash) {
+    g.fillStyle = wash;
+    g.fillRect(0, 0, width, height);
   }
 
   // Your own gun, over everything else.
@@ -1902,13 +1942,12 @@ function webglAvailable() {
 }
 
 function mountMaze(ctx) {
-  let course = MAZE_COURSES[1];
-  let level = 0;                     // which maze of the course you are on
-  let maze = buildMaze(course.levels[0], course.levels[0]);
+  let area = MAZE_AREAS[0];
+  let level = 0;                     // which maze of the area you are on
+  let maze = buildMaze(area.levels[0], area.levels[0]);
   let walker = createWalker(maze);
   let courseDone = false;
   let monsters = [];
-  let packSize = MAZE_PACKS[0];
   let stalker = null;
   let dead = false;
   let health = PLAYER_HEALTH;
@@ -1931,8 +1970,10 @@ function mountMaze(ctx) {
   let gunModel = null;                      // the loaded weapon, once it arrives
   const gunAt = [0, 0, 0];                  // where it sits, between hip and eye
 
-  const loadout = () => MAZE_WEAPONS.slice(0, packSize);
-  const weapon = () => loadout()[Math.min(held, packSize - 1)] || MAZE_WEAPONS[0];
+  // One gun per monster, and the area decides how many of those there are.
+  const packSize = () => area.monsters;
+  const loadout = () => MAZE_WEAPONS.slice(0, packSize());
+  const weapon = () => loadout()[Math.min(held, packSize() - 1)] || MAZE_WEAPONS[0];
   let killer = null;                        // whichever of them finished you
   let deathTurn = 0;                        // how far through looking at it
   const sprint = { value: STAMINA_MAX, active: false };
@@ -1969,26 +2010,26 @@ function mountMaze(ctx) {
     strafeLeft: false, strafeRight: false, sprint: false,
   };
 
-  const bestKey = () => `maze-best-${course.id}`;
-  const sizeLabel = () => `${course.levels[level]}x${course.levels[level]}`;
-  const whereAmI = () => `Maze ${level + 1} of ${course.levels.length} · ${sizeLabel()}`;
+  const bestKey = () => `maze-best-${area.id}`;
+  const sizeLabel = () => `${area.levels[level]}x${area.levels[level]}`;
+  const whereAmI = () => `${area.label} ${level + 1}/${area.levels.length} · ${sizeLabel()}`;
   const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
   /* ---------- chrome ---------- */
 
-  const courseRow = segmented(
-    MAZE_COURSES.map((c) => ({ id: c.id, label: `${c.label} (${c.levels[0]}–${c.levels[c.levels.length - 1]})` })),
-    course.id, (id) => { course = courseById(id); restart(); },
-    { ariaLabel: 'Maze size' });
+  const areaRow = segmented(
+    MAZE_AREAS.map((a) => ({ id: a.id, label: a.label })),
+    area.id, (id) => { area = areaById(id); restart(); },
+    { ariaLabel: 'Area' });
 
-  const packRow = segmented(
-    MAZE_PACKS.map((n) => ({ id: String(n), label: `×${n}` })),
-    String(packSize), (id) => { packSize = Number(id); restart(); },
-    { ariaLabel: 'How many monsters' });
+  const areaNote = document.createElement('p');
+  areaNote.className = 'fieldnote';
 
-  const packNote = document.createElement('p');
-  packNote.className = 'fieldnote';
-  packNote.textContent = 'How many are hunting you — and how many guns you carry';
+  const describeArea = () => {
+    areaNote.textContent = `${area.levels.length} mazes · ${area.levels[0]}x${area.levels[0]} to `
+      + `${area.levels[area.levels.length - 1]}x${area.levels[area.levels.length - 1]} · `
+      + `${area.monsters} hunting you, ${area.monsters} gun${area.monsters > 1 ? 's' : ''} to carry`;
+  };
 
   const scoreRow = statRow([
     { key: 'level', label: 'Maze', value: '1', tone: 'x' },
@@ -2120,7 +2161,7 @@ function mountMaze(ctx) {
     ammoBox.classList.toggle('is-reloading', reloading > 0);
 
     // One pip per gun you are carrying, the one in hand lit.
-    if (ammoSlots.childElementCount !== packSize) {
+    if (ammoSlots.childElementCount !== packSize()) {
       ammoSlots.replaceChildren(...loadout().map(() => {
         const pip = document.createElement('i');
         pip.className = 'ammo__pip';
@@ -2138,7 +2179,8 @@ function mountMaze(ctx) {
     return note;
   }
 
-  ctx.settings.append(courseRow.el, packRow.el, packNote);
+  describeArea();
+  ctx.settings.append(areaRow.el, areaNote);
   ctx.score.append(scoreRow.el);
   const fireRow = document.createElement('div');
   fireRow.className = 'holdrow';
@@ -2154,7 +2196,7 @@ function mountMaze(ctx) {
   // The shell's fullscreen button drives the 3D view rather than the whole
   // page, so going fullscreen also grabs the pointer for mouse look.
   ctx.setFullscreenTarget(view);
-  ctx.setTheme('maze');
+  ctx.setTheme(area.theme);
   ctx.setHint('WASD move · space sprint · click fire · right-click aim · R/Shift reload · 1-5 swap · ⛶ mouse look');
 
   function setInput(dir, down) {
@@ -2177,14 +2219,22 @@ function mountMaze(ctx) {
     scene = new THREE.Scene();
     // Fog tinted to the dusk horizon, and pushed well back: seeing a long way
     // down a corridor is most of what sells the depth.
-    scene.fog = new THREE.Fog(0xc9b79c, 14, 80);
+    /* One place, two lights. The Foundry is the same maze under a red one:
+       the surfaces keep their own textures and are tinted, the fog turns to
+       smoke, and the sun goes from evening gold to furnace orange. Nothing is
+       rebuilt, so it costs a handful of colour values and no geometry. */
+    const paint = area.tint || {};
+    scene.fog = new THREE.Fog(paint.fog === undefined ? 0xc9b79c : paint.fog, 14, 80);
 
     camera = new THREE.PerspectiveCamera(MAZE_FOV, 16 / 10, 0.05, 220);
 
     // Sky: a big sphere seen from the inside, unaffected by fog.
     const skyDome = new THREE.Mesh(
       new THREE.SphereGeometry(110, 32, 20),
-      new THREE.MeshBasicMaterial({ map: skin.sky, side: THREE.BackSide, fog: false }));
+      new THREE.MeshBasicMaterial({
+        map: skin.sky, side: THREE.BackSide, fog: false,
+        color: paint.sky === undefined ? 0xffffff : paint.sky,
+      }));
     skyDome.position.set(maze.w / 2, 0, maze.h / 2);
     scene.add(skyDome);
 
@@ -2200,9 +2250,11 @@ function mountMaze(ctx) {
       normalScale: new THREE.Vector2(0.85, 0.85),
       shininess: 6,
       specular: 0x2a2f36,
-      color: 0xffffff,
+      color: paint.surface === undefined ? 0xffffff : paint.surface,
     });
-    const brickTop = new THREE.MeshLambertMaterial({ map: skin.cap, color: 0xffffff });
+    const brickTop = new THREE.MeshLambertMaterial({
+      map: skin.cap, color: paint.coping === undefined ? 0xffffff : paint.coping,
+    });
     // BoxGeometry face order is +x, -x, +y, -y, +z, -z — index 2 is the top,
     // which is on show now there is no ceiling.
     const wallMaterial = [brickSide, brickSide, brickTop, brickTop, brickSide, brickSide];
@@ -2243,7 +2295,10 @@ function mountMaze(ctx) {
        mesh with a single material it is one more draw call for the lot. */
     coping = new THREE.InstancedMesh(
       new THREE.BoxGeometry(1.13, 0.09, 1.13),
-      new THREE.MeshPhongMaterial({ color: 0xdfe3e6, shininess: 18, specular: 0x3a4048 }),
+      new THREE.MeshPhongMaterial({
+        color: paint.coping === undefined ? 0xdfe3e6 : paint.coping,
+        shininess: 18, specular: 0x3a4048,
+      }),
       blocks.length);
 
     blocks.forEach(([x, y], i) => {
@@ -2281,7 +2336,9 @@ function mountMaze(ctx) {
       // A wide, weak highlight: sealed concrete rather than matte grit, which
       // is what gives the floor a direction under the sky.
       new THREE.MeshPhongMaterial({
-        map: floorTexture, color: 0xffffff, shininess: 26, specular: 0x2d3646,
+        map: floorTexture,
+        color: paint.floor === undefined ? 0xffffff : paint.floor,
+        shininess: 26, specular: 0x2d3646,
       }));
     floor.rotation.x = -Math.PI / 2;
     floor.position.set(maze.w / 2, 0, maze.h / 2);
@@ -2304,15 +2361,17 @@ function mountMaze(ctx) {
        light travelling with you paints a bright halo on whatever is nearest,
        which is the "glow" that makes it look dated. Flat, even light from the
        sky and a low sun keeps the surfaces matte. */
-    scene.add(new THREE.HemisphereLight(0xcfe0f5, 0x4a4238, 1.15));
+    scene.add(new THREE.HemisphereLight(
+      paint.hemiSky === undefined ? 0xcfe0f5 : paint.hemiSky,
+      paint.hemiGround === undefined ? 0x4a4238 : paint.hemiGround, 1.15));
 
-    const sun = new THREE.DirectionalLight(0xffd9a8, 0.8);
+    const sun = new THREE.DirectionalLight(paint.sun === undefined ? 0xffd9a8 : paint.sun, 0.8);
     sun.position.set(maze.w * 0.8, 22, -maze.h * 0.35);
     scene.add(sun);
 
     // A second, cooler light from the opposite side so the shaded faces are
     // readable instead of black.
-    const fill = new THREE.DirectionalLight(0x9fbfe8, 0.35);
+    const fill = new THREE.DirectionalLight(paint.fill === undefined ? 0x9fbfe8 : paint.fill, 0.35);
     fill.position.set(-maze.w * 0.4, 16, maze.h * 0.7);
     scene.add(fill);
 
@@ -2342,6 +2401,7 @@ function mountMaze(ctx) {
     gunScene.add(gunFill);
 
     fitWeapon();
+    warmLoadout();
 
     /* The creatures — one per monster, paired by index.
 
@@ -2441,6 +2501,17 @@ function mountMaze(ctx) {
      and the model replaces it when it turns up. Asking for a weapon twice in
      quick succession is fine: the check on the way back makes sure only the
      answer for the weapon still selected is used. */
+  /* Fetch every gun in the loadout, not only the one in hand.
+
+     Switching weapons should be instant, and a model arriving a moment late
+     means the painted stand-in flashes up in its place. They are cached after
+     the first fetch, so this costs one round trip per gun per session — and an
+     area that hands you three guns is an area where you will be reaching for
+     all three. */
+  function warmLoadout() {
+    for (const gun of loadout()) loadWeaponModel(gun);
+  }
+
   function fitWeapon() {
     if (!gunRig) return;
     const wanted = weapon();
@@ -2704,7 +2775,8 @@ function mountMaze(ctx) {
     }
 
     if (flat) {
-      drawRaycast(flat, maze, walker, pitch, flatCanvas.width, flatCanvas.height, monsters, recoil);
+      drawRaycast(flat, maze, walker, pitch, flatCanvas.width, flatCanvas.height, monsters, recoil,
+        area.tint && area.tint.wash);
     } else {
       camera.position.set(walker.x, eye, walker.y);
       camera.rotation.set(pitch, -walker.yaw - Math.PI / 2, 0, 'YXZ');
@@ -2714,7 +2786,8 @@ function mountMaze(ctx) {
     mapAge += dt;
     if (mapAge >= MINIMAP_PERIOD) {
       mapAge = 0;
-      drawMinimap(map2d, maze, walker, MINIMAP_PX, monsters);
+      drawMinimap(map2d, maze, walker, MINIMAP_PX, monsters,
+        (area.tint && area.tint.map) || undefined);
     }
     scoreRow.set('time', clock(seconds));
 
@@ -2768,7 +2841,8 @@ function mountMaze(ctx) {
 
     const sink = EYE_HEIGHT - deathTurn * 0.22;   // knees giving way
     if (flat) {
-      drawRaycast(flat, maze, walker, pitch, flatCanvas.width, flatCanvas.height, monsters, 0);
+      drawRaycast(flat, maze, walker, pitch, flatCanvas.width, flatCanvas.height, monsters, 0,
+        area.tint && area.tint.wash);
     } else if (renderer) {
       if (gunRig) gunRig.visible = false;         // you have dropped it
       camera.position.set(walker.x, sink, walker.y);
@@ -2800,17 +2874,17 @@ function mountMaze(ctx) {
     aiming = false;
 
     goneLine.textContent =
-      `Maze ${level + 1} of ${course.levels.length} · ${clock(seconds)}` +
+      `Maze ${level + 1} of ${area.levels.length} · ${clock(seconds)}` +
       `${kills ? ` · ${kills} put down` : ''}`;
     gameOver.hidden = false;
     retryBtn.focus();
 
-    ctx.setStatus(`It got you on maze ${level + 1} of ${course.levels.length} · ${clock(seconds)}`, false);
+    ctx.setStatus(`It got you on maze ${level + 1} of ${area.levels.length} · ${clock(seconds)}`, false);
   }
 
   // Take out a different gun. Each keeps whatever it had left in it.
   function takeOut(index) {
-    const next = Math.max(0, Math.min(packSize - 1, index));
+    const next = Math.max(0, Math.min(packSize() - 1, index));
     if (next === held || dead) return;
     held = next;
     reloading = 0;
@@ -2871,15 +2945,15 @@ function mountMaze(ctx) {
     audio.play('slain');
     respawnMonster(maze, walker, target);
     refreshBars(0);
-    ctx.setStatus(packSize > 1
-      ? `One down — and already back up somewhere. ${kills} so far, ${packSize} still out there.`
+    ctx.setStatus(packSize() > 1
+      ? `One down — and already back up somewhere. ${kills} so far, ${packSize()} still out there.`
       : `Down — but it is already back on its feet somewhere. ${kills} so far.`);
   }
 
   // Escaping one maze drops you straight into the next. The clock keeps
   // running across the whole course; only the last one finishes the run.
   function escape() {
-    const last = level >= course.levels.length - 1;
+    const last = level >= area.levels.length - 1;
 
     if (!last) {
       level += 1;
@@ -2898,20 +2972,20 @@ function mountMaze(ctx) {
     if (isBest) storage.set(bestKey(), seconds);
     scoreRow.set('best', clock(storage.get(bestKey(), seconds)));
     ctx.setStatus(
-      `Course complete — all ${course.levels.length} mazes in ${clock(seconds)}${isBest ? ' · new best!' : ''}`,
+      `${area.label} complete — all ${area.levels.length} mazes in ${clock(seconds)}${isBest ? ' · new best!' : ''}`,
       true);
   }
 
   // Builds the current level's maze without resetting the run's clock.
   function loadLevel() {
-    const cells = course.levels[level];
+    const cells = area.levels[level];
     maze = buildMaze(cells, cells);
     walker = createWalker(maze);
-    monsters = Array.from({ length: packSize },
+    monsters = Array.from({ length: packSize() },
       () => createMonster(maze, walker));
     // A gun apiece, all of them loaded.
     rounds = loadout().map((w) => w.ammo);
-    held = Math.min(held, packSize - 1);
+    held = Math.min(held, packSize() - 1);
     reloading = 0;
     health = PLAYER_HEALTH;
     sprint.value = STAMINA_MAX;
@@ -2922,7 +2996,7 @@ function mountMaze(ctx) {
     pitch = 0;
 
     const route = solveMaze(maze);
-    scoreRow.set('level', `${level + 1}/${course.levels.length}`);
+    scoreRow.set('level', `${level + 1}/${area.levels.length}`);
     scoreRow.set('left', route ? `${route.length} steps` : '—');
 
     if (renderer && !flat) buildScene();
@@ -3094,7 +3168,7 @@ function mountMaze(ctx) {
   function onWheel(event) {
     if (!running || dead) return;
     event.preventDefault();
-    takeOut((held + (event.deltaY > 0 ? 1 : -1) + packSize) % packSize);
+    takeOut((held + (event.deltaY > 0 ? 1 : -1) + packSize()) % packSize());
   }
 
   // Right-clicking a game should aim, not open a menu over it.
@@ -3174,14 +3248,14 @@ if (typeof registerGame !== 'undefined') {
 if (typeof module !== 'undefined') {
   module.exports = {
     buildMaze, solveMaze, isWall, createWalker, stepWalker, moveWalker,
-    MAZE_COURSES, courseById, WALKER_RADIUS, WALK_SPEED, TURN_SPEED, SPRINT_MULTIPLIER,
+    MAZE_AREAS, areaById, WALKER_RADIUS, WALK_SPEED, TURN_SPEED, SPRINT_MULTIPLIER,
     drawRaycast, drawMinimap, drawGun, cellKey, keyX, keyY, MAZE_FOV, WALL_HEIGHT, EYE_HEIGHT,
     makeTextures, drawCreature, createMonster, respawnMonster, spawnSpot,
     paintBrick, paintBrickNormal, paintCap, paintFloor, paintFur, paintFace, paintGun, paintSky,
     stepMonster, monsterCloseness, pickTarget, nearestMonster,
     monsterSees, monsterHears, alertMonsters, pickSearchTarget, openCells,
     SIGHT_RANGE, SIGHT_CONE, HEAR_WALK, HEAR_SPRINT, SHOT_NOISE, LOSE_PATIENCE,
-    shotHits, clearLine, stepSprint, MAZE_PACKS,
+    shotHits, clearLine, stepSprint,
     MONSTER_SPEED, MONSTER_MIN_START, MONSTER_REACH, MONSTER_DAMAGE, RESPAWN_MIN,
     PLAYER_HEALTH, MONSTER_HEALTH, SHOT_DAMAGE, SHOT_RANGE,
     STAMINA_MAX, SPRINT_DRAIN, STAMINA_REGEN, SPRINT_FLOOR,

@@ -76,11 +76,31 @@ so the mouse steers the camera —
 leave fullscreen and it releases, and the mouse is an ordinary cursor again.
 Keyboard turning works either way.
 
-Pick a size and you get a run of three mazes at that scale, each a little
-bigger than the last. Escape one and you drop straight into the next, with the
-clock running across the whole run; only finishing all three completes it.
-Small runs 16x16 to 24x24, Medium 24 to 36, Large 36 to 52 — a 52 is a 105x105
-grid with a shortest route of around 940 steps.
+### Areas
+
+An area is a whole place rather than a difficulty dial. It fixes how big its
+mazes are, how many of them there are, how many things are hunting you — and
+therefore how many guns you carry, since that is one apiece — and what the
+place looks like.
+
+| | mazes | size | hunting you | guns |
+|---|---|---|---|---|
+| **Stone Maze** | 3 | 16×16 to 24×24 | 1 | 9mm |
+| **The Foundry** | 5 | 24×24 to 36×36 | 3 | 9mm, Revolver, SMG |
+
+Escape one maze and you drop straight into the next, with the clock running
+across the whole run; only finishing the last one completes the area.
+
+**The Foundry is the same maze under a red light.** Nothing about it is rebuilt
+— the surfaces keep their own textures and are tinted, the fog turns to smoke,
+the sun goes from evening gold to furnace orange, and the HUD accent follows.
+The 2D fallback lays a single wash over the finished frame to match, which is
+all that renderer can afford and all it needs. The way out stays green: tint
+that too and you would lose it.
+
+The whole loadout is fetched when an area loads, not just the gun in hand —
+switching should be instant, and a model arriving a moment late would flash the
+painted stand-in up in its place.
 
 Brick walls, tiled floors and the sky are painted onto 2D canvases at load
 time and used as textures, so there are still no image files to download. The
