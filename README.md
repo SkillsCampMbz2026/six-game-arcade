@@ -292,6 +292,15 @@ Those characters are pinned by tests written against the 9mm rather than by
 rank — three of the five were asked for high damage, and only two can be in
 any top two.
 
+**Each one sounds like what it is.** The report is shaped by the weapon's own
+numbers rather than recorded per gun: damage and reload time give a weight from
+0 to 1, and that decides how loud it is, how far the tone falls, how long it
+rings and what it is built from. The SMG gets a thin bright crack through a
+highpass and nothing else. The sniper gets that crack pitched right down, a
+longer report under it, a chest thump and the walls answering a moment later —
+**3.8 times the loudness and twice the layers**. Rebalance a gun and its sound
+follows on its own.
+
 **Right-click brings the sights up**, narrowing the view from 95 degrees to 52
 and bringing the weapon onto the centre line; sway and recoil damp to a fifth
 while it is there. **R reloads**, and firing dry starts one by itself.
@@ -411,7 +420,8 @@ Fullscreen API.
 ## Sound
 
 Every effect is synthesised with the Web Audio API — no audio files, so this
-stays a plain static page. The racer gets a continuous engine note that tracks
+stays a plain static page. Gunshots take a weight argument, so five weapons
+share one piece of sound design rather than five recordings. The racer gets a continuous engine note that tracks
 speed with road noise layered under it. The 🔊 button in the title bar
 remembers your choice.
 

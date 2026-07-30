@@ -77,6 +77,25 @@ const MAZE_WEAPONS = [
   },
 ];
 
+/* How heavy a weapon sounds, 0 for the lightest thing you carry and 1 for the
+   heaviest.
+
+   Worked out from the gun's own numbers rather than set by hand: hard-hitting
+   and slow to reload at one end, soft and quick at the other. Rebalance a
+   weapon and its report follows on its own, which is the point — a shotgun
+   that had been quietly nerfed into a peashooter would otherwise go on
+   sounding like a cannon. */
+function weaponHeft(weapon, all = MAZE_WEAPONS) {
+  const spread = (key) => {
+    const values = all.map((w) => w[key]);
+    const lowest = Math.min(...values);
+    const highest = Math.max(...values);
+    return highest === lowest ? 0 : (weapon[key] - lowest) / (highest - lowest);
+  };
+  // Damage counts for more than reload: it is what you hear first.
+  return spread('damage') * 0.65 + spread('reload') * 0.35;
+}
+
 /* Where the weapon sits with the sights up: on the centre line, close to the
    eye. Every one of them comes to the same place, which is the point — the
    crosshair is where the round goes whatever you are holding. */
@@ -2805,7 +2824,7 @@ function mountMaze(ctx) {
     // Out of rounds: a dry click, and it starts reloading by itself.
     if (!rounds[held]) {
       shotTimer = weapon().cooldown;
-      audio.play('click');
+      audio.play('click');   // the dry click of an empty gun
       reload();
       return;
     }
@@ -2815,7 +2834,7 @@ function mountMaze(ctx) {
     shotTimer = gun.cooldown;
     flash = 0.07;
     recoil = 1;
-    audio.play('shot');
+    audio.play('shot', weaponHeft(gun));
 
     // Loud. Everything within earshot now knows exactly where you fired from.
     alertMonsters(monsters, walker);
@@ -3152,6 +3171,6 @@ if (typeof module !== 'undefined') {
     MONSTER_SPEED, MONSTER_MIN_START, MONSTER_REACH, MONSTER_DAMAGE, RESPAWN_MIN,
     PLAYER_HEALTH, MONSTER_HEALTH, SHOT_DAMAGE, SHOT_RANGE,
     STAMINA_MAX, SPRINT_DRAIN, STAMINA_REGEN, SPRINT_FLOOR,
-    MAZE_WEAPONS, SHOT_COOLDOWN, RELOAD_TIME, ADS_FOV, MONSTER_HEIGHT,
+    MAZE_WEAPONS, SHOT_COOLDOWN, RELOAD_TIME, ADS_FOV, MONSTER_HEIGHT, weaponHeft,
   };
 }

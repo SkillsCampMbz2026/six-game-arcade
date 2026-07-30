@@ -125,11 +125,45 @@ const audio = (() => {
     lose: () => notes([392, 330, 262], 0.13, { type: 'sawtooth', gain: 0.18 }),
     draw: () => notes([440, 415], 0.12),
     step: () => hiss({ dur: 0.07, freq: 260, gain: 0.09, type: 'lowpass' }),
-    // A crack and a thump: bright noise for the report, a falling tone under
-    // it for the recoil.
-    shot: () => {
-      hiss({ dur: 0.09, freq: 3200, gain: 0.3, type: 'highpass' });
-      tone({ freq: 260, to: 60, dur: 0.16, type: 'square', gain: 0.24 });
+    /* A gunshot, shaped by how heavy the weapon is — 0 for the lightest thing
+       you carry, 1 for the heaviest.
+
+       A light, fast gun gets a bright crack and nothing else: short, thin, and
+       quiet enough to fire sixteen times a second without turning to mush. A
+       heavy one gets the crack pitched right down, a longer report under it, a
+       thump you feel rather than hear, and the walls answering a moment later.
+       Loudness roughly doubles across that range. */
+    shot: (heft = 0) => {
+      const w = Math.max(0, Math.min(1, heft));
+
+      // The crack. Bright and brief when light, dull and drawn out when heavy.
+      hiss({
+        dur: 0.05 + w * 0.1,
+        freq: 3600 - w * 2600,
+        gain: 0.2 + w * 0.22,
+        type: w > 0.5 ? 'lowpass' : 'highpass',
+      });
+
+      // The report: further to fall, and longer about it, the heavier it is.
+      tone({
+        freq: 320 - w * 215,
+        to: 70 - w * 34,
+        dur: 0.12 + w * 0.34,
+        type: w > 0.45 ? 'sawtooth' : 'square',
+        gain: 0.18 + w * 0.28,
+      });
+
+      // Only the heavy ones have a chest thump, or an echo off the walls.
+      if (w > 0.35) {
+        tone({ freq: 92 - w * 42, to: 30, dur: 0.3 + w * 0.4, type: 'sine', gain: 0.16 + w * 0.24 });
+        hiss({
+          dur: 0.35 + w * 0.5,
+          freq: 380,
+          gain: 0.05 + w * 0.11,
+          type: 'lowpass',
+          delay: 0.06 + w * 0.06,
+        });
+      }
     },
     impact: () => hiss({ dur: 0.11, freq: 700, gain: 0.2, type: 'bandpass' }),
     hurt: () => {
@@ -153,9 +187,9 @@ const audio = (() => {
     finish: () => notes([523, 659, 784, 1047, 1319], 0.11),
   };
 
-  function play(name) {
+  function play(name, ...args) {
     const effect = EFFECTS[name];
-    if (effect && enabled) effect();
+    if (effect && enabled) effect(...args);
   }
 
   /* The sound of a car in motion: an engine note whose pitch and brightness
